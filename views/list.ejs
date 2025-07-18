@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>暱稱清單</title>
+</head>
+<body>
+  <h2>暱稱清單（共 <%= rows.length %> 筆）</h2>
+  <table border="1" cellspacing="0" cellpadding="6">
+    <tr>
+      <th>LINE名稱</th>
+      <th>暱稱</th>
+      <th>伺服器</th>
+      <th>備註</th>
+    </tr>
+    <% rows.forEach(row => { %>
+      <tr>
+        <td><%= row.name %></td>
+        <td><%= row.nickname %></td>
+        <td><%= row.server %></td>
+        <td><%= row.note || '（無）' %></td>
+      </tr>
+    <% }) %>
+  </table>
+
+  <br>
+  <a href="/export/excel" target="_blank">
+    <button>⬇️ 匯出 Excel</button>
+  </a>
+</body>
+</html>
