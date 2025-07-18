@@ -8,10 +8,8 @@ const XLSX = require('xlsx');
 
 const app = express();
 
-// ✅ 請填入你允許 bot 停留的群組 ID
 const allowedGroups = [
-  'YOUR_GROUP_ID_1',
-  'YOUR_GROUP_ID_2'
+  'Ce60dfe3b5c78e72f7d556dcc9a9f03dd' // 實際允許的群組 ID
 ];
 
 const config = {
@@ -21,10 +19,10 @@ const config = {
 
 const client = new line.Client(config);
 
-// 🔸 初始化 SQLite 資料庫
+// SQLite 初始化
 const db = new sqlite3.Database('nickname.db');
 db.serialize(() => {
-  db.run(`
+  db.run(\`
     CREATE TABLE IF NOT EXISTS nicknames (
       lineId TEXT PRIMARY KEY,
       nickname TEXT NOT NULL,
@@ -32,10 +30,10 @@ db.serialize(() => {
       note TEXT,
       name TEXT
     )
-  `);
+  \`);
 });
 
-// 🔸 LINE webhook 入口
+// webhook
 app.post('/webhook', line.middleware(config), (req, res) => {
   Promise.all(req.body.events.map(handleEvent))
     .then(result => res.json(result))
@@ -45,26 +43,27 @@ app.post('/webhook', line.middleware(config), (req, res) => {
     });
 });
 
-// 🔹 處理各種事件
 function handleEvent(event) {
   const userId = event.source.userId;
 
-  // ✅ 自動退出不在名單的群組
   if (event.type === 'join' && event.source.type === 'group') {
     const groupId = event.source.groupId;
     console.log('加入的群組 ID：', groupId);
 
     if (!allowedGroups.includes(groupId)) {
-      return client.leaveGroup(groupId);
+      return client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: '⚠️ 抱歉，這個群組不是授權名單，我將離開...'
+      }).then(() => client.leaveGroup(groupId));
     } else {
       return client.replyMessage(event.replyToken, {
         type: 'text',
-        text: '👋 嗨～我來啦！這是被主人允許的群組 ✅'
+        text: '👋 嗨～我來啦！這是主人允許的群組 ✅
+請輸入 @登記暱稱 開始使用～'
       });
     }
   }
 
-  // 🎉 其他 join（如 room）也可以顯示歡迎詞
   if (event.type === 'join') {
     return client.replyMessage(event.replyToken, {
       type: 'text',
@@ -72,12 +71,10 @@ function handleEvent(event) {
     });
   }
 
-  // 🧊 忽略非文字訊息
   if (event.type !== 'message' || event.message.type !== 'text') {
     return Promise.resolve(null);
   }
 
-  // ✅ 處理文字訊息邏輯
   const text = event.message.text;
   let userName = userId;
 
@@ -85,7 +82,6 @@ function handleEvent(event) {
     .then(name => {
       userName = name;
 
-      // 🟢 登記暱稱
       if (text.startsWith('@登記暱稱')) {
         const parts = text.split('/');
         const nickname = parts[1]?.trim();
@@ -96,7 +92,7 @@ function handleEvent(event) {
           return reply(event.replyToken, '請輸入正確格式：@登記暱稱/暱稱/伺服器/備註（備註可省略）');
         }
 
-        const stmt = db.prepare(`
+        const stmt = db.prepare(\`
           INSERT INTO nicknames (lineId, nickname, server, note, name)
           VALUES (?, ?, ?, ?, ?)
           ON CONFLICT(lineId) DO UPDATE SET
@@ -104,35 +100,35 @@ function handleEvent(event) {
             server = excluded.server,
             note = excluded.note,
             name = excluded.name
-        `);
+        \`);
 
         stmt.run(userId, nickname, server, note, userName, err => {
           if (err) {
             console.error(err);
             return reply(event.replyToken, '登記失敗，請稍後再試！');
           }
-          return reply(event.replyToken, `✅ 暱稱已登記為：${nickname}`);
+          return reply(event.replyToken, \`✅ 暱稱已登記為：\${nickname}\`);
         });
 
         stmt.finalize();
         return;
       }
 
-      // 🟡 找人
       if (text.startsWith('@找人/')) {
         const keyword = text.split('/')[1]?.trim();
         if (!keyword) return reply(event.replyToken, '請輸入關鍵字！');
 
-        db.all(`
+        db.all(\`
           SELECT * FROM nicknames
           WHERE nickname LIKE ? OR server LIKE ? OR note LIKE ? OR name LIKE ?
-        `, [`%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`], (err, rows) => {
+        \`, [`%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`], (err, rows) => {
           if (err) return reply(event.replyToken, '查詢失敗');
+
           if (rows.length === 0) return reply(event.replyToken, '查無符合的紀錄');
 
-          let msg = `符合「${keyword}」的結果：\n`;
+          let msg = \`符合「\${keyword}」的結果：\n\`;
           rows.forEach(e => {
-            msg += `${e.name}｜暱稱：${e.nickname}｜伺服器：${e.server}｜備註：${e.note || '（無）'}\n`;
+            msg += \`\${e.name}｜暱稱：\${e.nickname}｜伺服器：\${e.server}｜備註：\${e.note || '（無）'}\n\`;
           });
 
           return reply(event.replyToken, msg);
@@ -140,15 +136,14 @@ function handleEvent(event) {
         return;
       }
 
-      // 🟠 清單
       if (text === '@暱稱清單' || text === '暱稱名單') {
-        db.all(`SELECT * FROM nicknames`, (err, rows) => {
+        db.all(\`SELECT * FROM nicknames\`, (err, rows) => {
           if (err) return reply(event.replyToken, '資料讀取錯誤');
           if (rows.length === 0) return reply(event.replyToken, '目前沒有登記資料');
 
-          let msg = `暱稱清單（共 ${rows.length} 筆）：\n`;
+          let msg = \`暱稱清單（共 \${rows.length} 筆）：\n\`;
           rows.forEach(e => {
-            msg += `${e.name}｜暱稱：${e.nickname}｜伺服器：${e.server}｜備註：${e.note || '（無）'}\n`;
+            msg += \`\${e.name}｜暱稱：\${e.nickname}｜伺服器：\${e.server}｜備註：\${e.note || '（無）'}\n\`;
           });
 
           return reply(event.replyToken, msg);
@@ -156,9 +151,8 @@ function handleEvent(event) {
         return;
       }
 
-      // 🟣 說明
       if (text === '@說明') {
-        const guide = `
+        const guide = \`
 📘 使用說明：
 
 1️⃣ 登記暱稱  
@@ -169,19 +163,18 @@ function handleEvent(event) {
 
 3️⃣ 檢視清單  
 @暱稱清單 或 暱稱名單
-`.trim();
+\`.trim();
         return reply(event.replyToken, guide);
       }
 
-      return reply(event.replyToken, '請輸入 @登記暱稱 或 @找人 查詢暱稱～');
+      return reply(event.replyToken,'請輸入 @登記暱稱 或 @找人 查詢暱稱～');
     })
     .catch(err => {
       console.error('錯誤：', err);
-      return reply(event.replyToken, '發生錯誤，請稍後再試');
+      return reply(event.replyToken,'發生錯誤，請稍後再試');
     });
 }
 
-// 🔹 抓取使用者名稱
 function getDisplayName(source) {
   if (source.type === 'user') {
     return client.getProfile(source.userId).then(p => p.displayName);
@@ -193,7 +186,6 @@ function getDisplayName(source) {
   return Promise.resolve(source.userId);
 }
 
-// 🔸 傳送文字回覆
 function reply(token, msg) {
   return client.replyMessage(token, {
     type: 'text',
@@ -201,51 +193,6 @@ function reply(token, msg) {
   });
 }
 
-// 🔐 Basic Auth 驗證
-function authCheck(req, res, next) {
-  const credentials = basicAuth(req);
-  if (!credentials || credentials.name !== process.env.ADMIN_USER || credentials.pass !== process.env.ADMIN_PASS) {
-    res.set('WWW-Authenticate', 'Basic realm="Protected"');
-    return res.status(401).send('請輸入正確帳密！');
-  }
-  next();
-}
-
-// 🌐 查詢頁面
-app.get('/list', authCheck, (req, res) => {
-  db.all(`SELECT * FROM nicknames`, (err, rows) => {
-    if (err) return res.send('資料錯誤');
-    let html = `<h2>暱稱清單（共 ${rows.length} 筆）</h2><ul>`;
-    rows.forEach(e => {
-      html += `<li>${e.name}｜暱稱：${e.nickname}｜伺服器：${e.server}｜備註：${e.note || '（無）'}</li>`;
-    });
-    html += '</ul>';
-    res.send(html);
-  });
-});
-
-// 📥 匯出 Excel
-app.get('/export', authCheck, (req, res) => {
-  db.all(`SELECT * FROM nicknames`, (err, rows) => {
-    if (err) return res.send('匯出錯誤');
-    const data = rows.map(r => ({
-      LINE名稱: r.name,
-      暱稱: r.nickname,
-      伺服器: r.server,
-      備註: r.note || ''
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "暱稱清單");
-
-    const filePath = '暱稱清單.xlsx';
-    XLSX.writeFile(wb, filePath);
-    res.download(filePath);
-  });
-});
-
-// ✅ 啟動伺服器
 app.listen(3000, () => {
   console.log('✅ LINE Bot 已啟動 http://localhost:3000');
 });
