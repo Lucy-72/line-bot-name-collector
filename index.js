@@ -223,7 +223,10 @@ app.get('/export', (req, res) => {
     res.download(filePath);
   });
 });
-
+// 🏠 根目錄（用於 Render 檢查 or 手動訪問首頁）
+app.get('/', (req, res) => {
+  res.send('🎉 LINE Bot Name Collector 已啟動！');
+});
 app.listen(3000, () => {
   console.log('✅ LINE Bot 已啟動：http://localhost:3000');
 });
