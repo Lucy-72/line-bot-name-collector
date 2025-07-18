@@ -8,7 +8,7 @@ const XLSX = require('xlsx');
 
 const app = express();
 
-// ✅ 你的允許群組 ID 清單（請填入自己的 groupId）
+// ✅ 請填入你允許 bot 停留的群組 ID
 const allowedGroups = [
   'YOUR_GROUP_ID_1',
   'YOUR_GROUP_ID_2'
@@ -21,7 +21,7 @@ const config = {
 
 const client = new line.Client(config);
 
-// 🔸 SQLite 初始化
+// 🔸 初始化 SQLite 資料庫
 const db = new sqlite3.Database('nickname.db');
 db.serialize(() => {
   db.run(`
@@ -35,7 +35,7 @@ db.serialize(() => {
   `);
 });
 
-// 🔸 webhook 入口
+// 🔸 LINE webhook 入口
 app.post('/webhook', line.middleware(config), (req, res) => {
   Promise.all(req.body.events.map(handleEvent))
     .then(result => res.json(result))
@@ -45,11 +45,11 @@ app.post('/webhook', line.middleware(config), (req, res) => {
     });
 });
 
-// 🔹 事件處理
+// 🔹 處理各種事件
 function handleEvent(event) {
   const userId = event.source.userId;
 
-  // ✅ 自動退出未授權群組（只處理群組 join）
+  // ✅ 自動退出不在名單的群組
   if (event.type === 'join' && event.source.type === 'group') {
     const groupId = event.source.groupId;
     console.log('加入的群組 ID：', groupId);
@@ -64,7 +64,7 @@ function handleEvent(event) {
     }
   }
 
-  // 🎉 其他場景 join 也可歡迎（例如 room）
+  // 🎉 其他 join（如 room）也可以顯示歡迎詞
   if (event.type === 'join') {
     return client.replyMessage(event.replyToken, {
       type: 'text',
@@ -72,11 +72,12 @@ function handleEvent(event) {
     });
   }
 
-  // 🧊 非文字訊息不處理
+  // 🧊 忽略非文字訊息
   if (event.type !== 'message' || event.message.type !== 'text') {
     return Promise.resolve(null);
   }
 
+  // ✅ 處理文字訊息邏輯
   const text = event.message.text;
   let userName = userId;
 
@@ -84,7 +85,7 @@ function handleEvent(event) {
     .then(name => {
       userName = name;
 
-      // 🟢 @登記暱稱
+      // 🟢 登記暱稱
       if (text.startsWith('@登記暱稱')) {
         const parts = text.split('/');
         const nickname = parts[1]?.trim();
@@ -117,7 +118,7 @@ function handleEvent(event) {
         return;
       }
 
-      // 🟡 @找人
+      // 🟡 找人
       if (text.startsWith('@找人/')) {
         const keyword = text.split('/')[1]?.trim();
         if (!keyword) return reply(event.replyToken, '請輸入關鍵字！');
@@ -127,7 +128,6 @@ function handleEvent(event) {
           WHERE nickname LIKE ? OR server LIKE ? OR note LIKE ? OR name LIKE ?
         `, [`%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`], (err, rows) => {
           if (err) return reply(event.replyToken, '查詢失敗');
-
           if (rows.length === 0) return reply(event.replyToken, '查無符合的紀錄');
 
           let msg = `符合「${keyword}」的結果：\n`;
@@ -173,15 +173,15 @@ function handleEvent(event) {
         return reply(event.replyToken, guide);
       }
 
-      return reply(event.replyToken,'請輸入 @登記暱稱 或 @找人 查詢暱稱～');
+      return reply(event.replyToken, '請輸入 @登記暱稱 或 @找人 查詢暱稱～');
     })
     .catch(err => {
       console.error('錯誤：', err);
-      return reply(event.replyToken,'發生錯誤，請稍後再試');
+      return reply(event.replyToken, '發生錯誤，請稍後再試');
     });
 }
 
-// 🔹 取得使用者名稱
+// 🔹 抓取使用者名稱
 function getDisplayName(source) {
   if (source.type === 'user') {
     return client.getProfile(source.userId).then(p => p.displayName);
@@ -193,7 +193,7 @@ function getDisplayName(source) {
   return Promise.resolve(source.userId);
 }
 
-// 🔸 回覆訊息
+// 🔸 傳送文字回覆
 function reply(token, msg) {
   return client.replyMessage(token, {
     type: 'text',
@@ -201,7 +201,17 @@ function reply(token, msg) {
   });
 }
 
-// 🔐 管理用頁面（查詢 & 匯出 Excel）
+// 🔐 Basic Auth 驗證
+function authCheck(req, res, next) {
+  const credentials = basicAuth(req);
+  if (!credentials || credentials.name !== process.env.ADMIN_USER || credentials.pass !== process.env.ADMIN_PASS) {
+    res.set('WWW-Authenticate', 'Basic realm="Protected"');
+    return res.status(401).send('請輸入正確帳密！');
+  }
+  next();
+}
+
+// 🌐 查詢頁面
 app.get('/list', authCheck, (req, res) => {
   db.all(`SELECT * FROM nicknames`, (err, rows) => {
     if (err) return res.send('資料錯誤');
@@ -214,6 +224,7 @@ app.get('/list', authCheck, (req, res) => {
   });
 });
 
+// 📥 匯出 Excel
 app.get('/export', authCheck, (req, res) => {
   db.all(`SELECT * FROM nicknames`, (err, rows) => {
     if (err) return res.send('匯出錯誤');
@@ -234,16 +245,7 @@ app.get('/export', authCheck, (req, res) => {
   });
 });
 
-// 🔐 Basic Auth 檢查
-function authCheck(req, res, next) {
-  const credentials = basicAuth(req);
-  if (!credentials || credentials.name !== process.env.ADMIN_USER || credentials.pass !== process.env.ADMIN_PASS) {
-    res.set('WWW-Authenticate', 'Basic realm="Protected"');
-    return res.status(401).send('請輸入正確帳密！');
-  }
-  next();
-}
-
+// ✅ 啟動伺服器
 app.listen(3000, () => {
   console.log('✅ LINE Bot 已啟動 http://localhost:3000');
 });
