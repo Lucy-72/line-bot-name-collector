@@ -49,7 +49,7 @@ app.post('/webhook', line.middleware(config), (req, res) => {
 function handleEvent(event) {
   const userId = event.source.userId;
 
-  // ✅ 自動退出未授權群組
+  // ✅ 自動退出未授權群組（只處理群組 join）
   if (event.type === 'join' && event.source.type === 'group') {
     const groupId = event.source.groupId;
     console.log('加入的群組 ID：', groupId);
@@ -64,7 +64,15 @@ function handleEvent(event) {
     }
   }
 
-  // 僅處理文字訊息
+  // 🎉 其他場景 join 也可歡迎（例如 room）
+  if (event.type === 'join') {
+    return client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: '🎉 感謝邀請我加入群組！請輸入 @登記暱稱 開始使用～'
+    });
+  }
+
+  // 🧊 非文字訊息不處理
   if (event.type !== 'message' || event.message.type !== 'text') {
     return Promise.resolve(null);
   }
