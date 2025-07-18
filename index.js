@@ -8,6 +8,12 @@ const XLSX = require('xlsx');
 
 const app = express();
 
+// ✅ 你的允許群組 ID 清單（請填入自己的 groupId）
+const allowedGroups = [
+  'YOUR_GROUP_ID_1',
+  'YOUR_GROUP_ID_2'
+];
+
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.CHANNEL_SECRET
@@ -15,7 +21,7 @@ const config = {
 
 const client = new line.Client(config);
 
-// 🔸 初始化 SQLite 資料庫
+// 🔸 SQLite 初始化
 const db = new sqlite3.Database('nickname.db');
 db.serialize(() => {
   db.run(`
@@ -29,7 +35,7 @@ db.serialize(() => {
   `);
 });
 
-// 🔸 LINE webhook 接收事件
+// 🔸 webhook 入口
 app.post('/webhook', line.middleware(config), (req, res) => {
   Promise.all(req.body.events.map(handleEvent))
     .then(result => res.json(result))
@@ -39,21 +45,38 @@ app.post('/webhook', line.middleware(config), (req, res) => {
     });
 });
 
-// 🔸 處理事件
+// 🔹 事件處理
 function handleEvent(event) {
+  const userId = event.source.userId;
+
+  // ✅ 自動退出未授權群組
+  if (event.type === 'join' && event.source.type === 'group') {
+    const groupId = event.source.groupId;
+    console.log('加入的群組 ID：', groupId);
+
+    if (!allowedGroups.includes(groupId)) {
+      return client.leaveGroup(groupId);
+    } else {
+      return client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: '👋 嗨～我來啦！這是被主人允許的群組 ✅'
+      });
+    }
+  }
+
+  // 僅處理文字訊息
   if (event.type !== 'message' || event.message.type !== 'text') {
     return Promise.resolve(null);
   }
 
   const text = event.message.text;
-  const userId = event.source.userId;
-
-  // 從事件中嘗試取得顯示名稱（私聊/群組/聊天室）
   let userName = userId;
+
   return getDisplayName(event.source)
     .then(name => {
       userName = name;
 
+      // 🟢 @登記暱稱
       if (text.startsWith('@登記暱稱')) {
         const parts = text.split('/');
         const nickname = parts[1]?.trim();
@@ -79,13 +102,14 @@ function handleEvent(event) {
             console.error(err);
             return reply(event.replyToken, '登記失敗，請稍後再試！');
           }
-          return reply(event.replyToken, `✅ 已成功登記暱稱為：${nickname}`);
+          return reply(event.replyToken, `✅ 暱稱已登記為：${nickname}`);
         });
 
         stmt.finalize();
         return;
       }
 
+      // 🟡 @找人
       if (text.startsWith('@找人/')) {
         const keyword = text.split('/')[1]?.trim();
         if (!keyword) return reply(event.replyToken, '請輸入關鍵字！');
@@ -94,16 +118,11 @@ function handleEvent(event) {
           SELECT * FROM nicknames
           WHERE nickname LIKE ? OR server LIKE ? OR note LIKE ? OR name LIKE ?
         `, [`%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`], (err, rows) => {
-          if (err) {
-            console.error(err);
-            return reply(event.replyToken, '查詢失敗！');
-          }
+          if (err) return reply(event.replyToken, '查詢失敗');
 
-          if (rows.length === 0) {
-            return reply(event.replyToken, '查無符合的紀錄');
-          }
+          if (rows.length === 0) return reply(event.replyToken, '查無符合的紀錄');
 
-          let msg = `符合關鍵字「${keyword}」的結果：\n`;
+          let msg = `符合「${keyword}」的結果：\n`;
           rows.forEach(e => {
             msg += `${e.name}｜暱稱：${e.nickname}｜伺服器：${e.server}｜備註：${e.note || '（無）'}\n`;
           });
@@ -113,10 +132,11 @@ function handleEvent(event) {
         return;
       }
 
+      // 🟠 清單
       if (text === '@暱稱清單' || text === '暱稱名單') {
         db.all(`SELECT * FROM nicknames`, (err, rows) => {
-          if (err) return reply(event.replyToken, '讀取資料失敗');
-          if (rows.length === 0) return reply(event.replyToken, '目前還沒有任何登記資料');
+          if (err) return reply(event.replyToken, '資料讀取錯誤');
+          if (rows.length === 0) return reply(event.replyToken, '目前沒有登記資料');
 
           let msg = `暱稱清單（共 ${rows.length} 筆）：\n`;
           rows.forEach(e => {
@@ -128,6 +148,7 @@ function handleEvent(event) {
         return;
       }
 
+      // 🟣 說明
       if (text === '@說明') {
         const guide = `
 📘 使用說明：
@@ -148,27 +169,23 @@ function handleEvent(event) {
     })
     .catch(err => {
       console.error('錯誤：', err);
-      return reply(event.replyToken, '發生錯誤，請稍後再試');
+      return reply(event.replyToken,'發生錯誤，請稍後再試');
     });
 }
 
-// 🔹 取得名稱
+// 🔹 取得使用者名稱
 function getDisplayName(source) {
   if (source.type === 'user') {
-    return client.getProfile(source.userId).then(profile => profile.displayName);
+    return client.getProfile(source.userId).then(p => p.displayName);
   } else if (source.type === 'group') {
-    return client.getGroupMemberProfile(source.groupId, source.userId)
-      .then(profile => profile.displayName)
-      .catch(() => source.userId);
+    return client.getGroupMemberProfile(source.groupId, source.userId).then(p => p.displayName).catch(() => source.userId);
   } else if (source.type === 'room') {
-    return client.getRoomMemberProfile(source.roomId, source.userId)
-      .then(profile => profile.displayName)
-      .catch(() => source.userId);
+    return client.getRoomMemberProfile(source.roomId, source.userId).then(p => p.displayName).catch(() => source.userId);
   }
   return Promise.resolve(source.userId);
 }
 
-// 🔸 傳送回覆
+// 🔸 回覆訊息
 function reply(token, msg) {
   return client.replyMessage(token, {
     type: 'text',
@@ -176,17 +193,10 @@ function reply(token, msg) {
   });
 }
 
-// 🔐 Web 查詢頁面（Basic Auth）
-app.get('/list', (req, res, next) => {
-  const credentials = basicAuth(req);
-  if (!credentials || credentials.name !== process.env.ADMIN_USER || credentials.pass !== process.env.ADMIN_PASS) {
-    res.set('WWW-Authenticate', 'Basic realm="Protected"');
-    return res.status(401).send('請輸入正確帳密！');
-  }
-  next();
-}, (req, res) => {
+// 🔐 管理用頁面（查詢 & 匯出 Excel）
+app.get('/list', authCheck, (req, res) => {
   db.all(`SELECT * FROM nicknames`, (err, rows) => {
-    if (err) return res.send('資料讀取錯誤');
+    if (err) return res.send('資料錯誤');
     let html = `<h2>暱稱清單（共 ${rows.length} 筆）</h2><ul>`;
     rows.forEach(e => {
       html += `<li>${e.name}｜暱稱：${e.nickname}｜伺服器：${e.server}｜備註：${e.note || '（無）'}</li>`;
@@ -196,17 +206,9 @@ app.get('/list', (req, res, next) => {
   });
 });
 
-// 📤 匯出 Excel
-app.get('/export', (req, res) => {
-  const credentials = basicAuth(req);
-  if (!credentials || credentials.name !== process.env.ADMIN_USER || credentials.pass !== process.env.ADMIN_PASS) {
-    res.set('WWW-Authenticate', 'Basic realm="Protected"');
-    return res.status(401).send('請輸入正確帳密！');
-  }
-
+app.get('/export', authCheck, (req, res) => {
   db.all(`SELECT * FROM nicknames`, (err, rows) => {
-    if (err) return res.send('資料匯出錯誤');
-
+    if (err) return res.send('匯出錯誤');
     const data = rows.map(r => ({
       LINE名稱: r.name,
       暱稱: r.nickname,
@@ -223,10 +225,17 @@ app.get('/export', (req, res) => {
     res.download(filePath);
   });
 });
-// 🏠 根目錄（用於 Render 檢查 or 手動訪問首頁）
-app.get('/', (req, res) => {
-  res.send('🎉 LINE Bot Name Collector 已啟動！');
-});
+
+// 🔐 Basic Auth 檢查
+function authCheck(req, res, next) {
+  const credentials = basicAuth(req);
+  if (!credentials || credentials.name !== process.env.ADMIN_USER || credentials.pass !== process.env.ADMIN_PASS) {
+    res.set('WWW-Authenticate', 'Basic realm="Protected"');
+    return res.status(401).send('請輸入正確帳密！');
+  }
+  next();
+}
+
 app.listen(3000, () => {
-  console.log('✅ LINE Bot 已啟動：http://localhost:3000');
+  console.log('✅ LINE Bot 已啟動 http://localhost:3000');
 });
