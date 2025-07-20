@@ -41,7 +41,7 @@ app.post('/webhook', line.middleware(config), (req, res) => {
 });
 
 function handleEvent(event) {
- console.log('收到事件：', JSON.stringify(event)); // <-- 加這行
+ console.log('收到事件：', JSON.stringify(event, null, 2)); // <-- 加這行
   const userId = event.source.userId;
 
   if (event.type === 'join' && event.source.type === 'group') {
