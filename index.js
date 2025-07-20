@@ -182,6 +182,7 @@ function reply(token, msg) {
   });
 }
 
-app.listen(3000, () => {
-  console.log('LINE Bot 已啟動：http://localhost:3000');
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`LINE Bot 已啟動：http:\\localhost: ${PORT}`);
 });
