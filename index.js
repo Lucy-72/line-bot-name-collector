@@ -16,7 +16,6 @@ const config = {
 
 const client = new line.Client(config);
 
-// 建立 SQLite 資料表（新增 groupId 作為多群組隔離）
 const db = new sqlite3.Database('nickname.db');
 db.serialize(() => {
   db.run(`
@@ -26,13 +25,12 @@ db.serialize(() => {
       nickname TEXT NOT NULL,
       server TEXT NOT NULL,
       note TEXT,
-      name TEXT,
+      name TEXT NOT NULL,
       PRIMARY KEY (lineId, groupId)
     )
   `);
 });
 
-// webhook 接收事件
 app.post('/webhook', line.middleware(config), (req, res) => {
   Promise.all(req.body.events.map(handleEvent))
     .then(result => res.json(result))
@@ -68,11 +66,10 @@ function handleEvent(event) {
   }
 
   const text = event.message.text;
-  let userName = userId;
 
   return getDisplayName(event.source)
-    .then(name => {
-      userName = name || '未知成員';
+    .then(userName => {
+      if (!userName) userName = '未知成員';
 
       if (text.startsWith('@登記暱稱')) {
         const parts = text.split('/');
