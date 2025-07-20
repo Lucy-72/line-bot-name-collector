@@ -6,7 +6,7 @@ const sqlite3 = require('sqlite3').verbose();
 const app = express();
 
 const allowedGroups = [
-  'Ce60dfe3b5c78e72f7d556dcc9a9f03dd' // 替換成你的群組 ID
+  'Ce60dfe3b5c78e72f7d556dcc9a9f03dd'
 ];
 
 const config = {
@@ -16,31 +16,23 @@ const config = {
 
 const client = new line.Client(config);
 
-// 建立 SQLite 資料表（解法 1：自動加欄位）
+// 建立 SQLite 資料表並新增 name 欄位（如果尚未存在）
 const db = new sqlite3.Database('nickname.db');
 db.serialize(() => {
-  db.run(`ALTER TABLE nicknames ADD COLUMN name TEXT`, err => {
-    if (err && !err.message.includes('duplicate column')) {
-      console.error('❌ 新增 name 欄位失敗：', err.message);
-    } else if (!err) {
-      console.log('✅ name 欄位新增成功（或已存在）');
-    }
-  });
-
   db.run(`
     CREATE TABLE IF NOT EXISTS nicknames (
       lineId TEXT PRIMARY KEY,
       nickname TEXT NOT NULL,
       server TEXT NOT NULL,
-      note TEXT
-      -- 不加 name，避免與 ALTER TABLE 衝突
+      note TEXT,
+      name TEXT
     )
-  `, err => {
-    if (err) {
-      console.error('❌ 建立資料表 nicknames 失敗：', err.message);
-    } else {
-      console.log('✅ 資料表 nicknames 準備完成');
-    }
+  `);
+
+  // 確保 name 欄位存在
+  db.get("PRAGMA table_info(nicknames)", (err, row) => {
+    if (err) return console.error('檢查欄位失敗', err);
+    db.run("ALTER TABLE nicknames ADD COLUMN name TEXT", () => {});
   });
 });
 
@@ -60,8 +52,6 @@ function handleEvent(event) {
 
   if (event.type === 'join' && event.source.type === 'group') {
     const groupId = event.source.groupId;
-    console.log('加入的群組 ID：', groupId);
-
     if (!allowedGroups.includes(groupId)) {
       return client.replyMessage(event.replyToken, {
         type: 'text',
@@ -80,11 +70,12 @@ function handleEvent(event) {
   }
 
   const text = event.message.text;
-  let userName = userId;
 
   return getDisplayName(event.source)
-    .then(name => {
-      userName = name;
+    .then(userName => {
+      if (!userName || userName === '未知成員') {
+        return reply(event.replyToken, '無法取得你的顯示名稱，請確認我有權限存取用戶資訊');
+      }
 
       if (text.startsWith('@登記暱稱')) {
         const parts = text.split('/');
@@ -183,11 +174,15 @@ function getDisplayName(source) {
   if (source.type === 'user') {
     return client.getProfile(source.userId).then(p => p.displayName);
   } else if (source.type === 'group') {
-    return client.getGroupMemberProfile(source.groupId, source.userId).then(p => p.displayName).catch(() => source.userId);
+    return client.getGroupMemberProfile(source.groupId, source.userId)
+      .then(p => p.displayName)
+      .catch(() => null);
   } else if (source.type === 'room') {
-    return client.getRoomMemberProfile(source.roomId, source.userId).then(p => p.displayName).catch(() => source.userId);
+    return client.getRoomMemberProfile(source.roomId, source.userId)
+      .then(p => p.displayName)
+      .catch(() => null);
   }
-  return Promise.resolve(source.userId);
+  return Promise.resolve(null);
 }
 
 function reply(token, msg) {
