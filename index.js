@@ -35,12 +35,13 @@ app.post('/webhook', line.middleware(config), (req, res) => {
   Promise.all(req.body.events.map(handleEvent))
     .then(result => res.json(result))
     .catch(err => {
-      console.error(err);
-      res.status(500).end();
+      console.error('處理 webhook 發生錯誤：', err);
+      res.status(500).end();// 沒有回應會造成 timeout
     });
 });
 
 function handleEvent(event) {
+ console.log('收到事件：', JSON.stringify(event)); // <-- 加這行
   const userId = event.source.userId;
 
   if (event.type === 'join' && event.source.type === 'group') {
@@ -184,5 +185,5 @@ function reply(token, msg) {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`LINE Bot 已啟動：http:\\localhost: ${PORT}`);
+  console.log(`LINE Bot 已啟動：http://localhost: ${PORT}`);
 });
